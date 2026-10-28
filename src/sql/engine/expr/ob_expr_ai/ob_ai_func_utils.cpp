@@ -968,6 +968,63 @@ int ObAIFuncUtils::parse_rerank_output(ObIAllocator &allocator,
   return ret;
 }
 
+namespace {
+
+// Integer types: J_INT, J_UINT and the SQL/JSON extended integer types.
+bool is_json_integer_type(const ObJsonNodeType type)
+{
+  return type == ObJsonNodeType::J_INT ||
+         type == ObJsonNodeType::J_UINT ||
+         type == ObJsonNodeType::J_OINT ||
+         type == ObJsonNodeType::J_OLONG;
+}
+
+// Any numeric type, including DECIMAL and the SQL/JSON extended numeric types.
+bool is_json_number_type(const ObJsonNodeType type)
+{
+  return is_json_integer_type(type) ||
+         type == ObJsonNodeType::J_DOUBLE ||
+         type == ObJsonNodeType::J_DECIMAL ||
+         type == ObJsonNodeType::J_OFLOAT ||
+         type == ObJsonNodeType::J_ODOUBLE ||
+         type == ObJsonNodeType::J_ODECIMAL;
+}
+
+} // namespace
+
+int ObAIFuncUtils::validate_ai_complete_config(ObJsonObject *config)
+{
+  int ret = OB_SUCCESS;
+  if (OB_ISNULL(config)) {
+    // no config, nothing to validate
+  } else {
+    // max_tokens must be integer
+    ObJsonNode *max_tokens = config->get_value("max_tokens");
+    if (OB_NOT_NULL(max_tokens) && !is_json_integer_type(max_tokens->json_type())) {
+      ret = OB_INVALID_ARGUMENT;
+      LOG_USER_ERROR(OB_INVALID_ARGUMENT, "ai_complete, max_tokens must be an integer");
+    }
+    // temperature must be a number
+    ObJsonNode *temperature = config->get_value("temperature");
+    if (OB_SUCC(ret) && OB_NOT_NULL(temperature) &&
+        !is_json_number_type(temperature->json_type())) {
+      ret = OB_INVALID_ARGUMENT;
+      LOG_USER_ERROR(OB_INVALID_ARGUMENT, "ai_complete, temperature must be a number");
+    }
+    // reserved fields must not be overridden
+    if (OB_SUCC(ret)) {
+      const char *reserved_fields[] = {"model", "messages", "stream", "prompt"};
+      for (int64_t i = 0; OB_SUCC(ret) && i < 4; i++) {
+        if (OB_NOT_NULL(config->get_value(reserved_fields[i]))) {
+          ret = OB_INVALID_ARGUMENT;
+          LOG_USER_ERROR(OB_INVALID_ARGUMENT, "ai_complete, reserved field is not allowed in config");
+        }
+      }
+    }
+  }
+  return ret;
+}
+
 int ObAIFuncJsonUtils::get_json_object(ObIAllocator &allocator, ObJsonObject *&obj_node)
 {
   int ret = OB_SUCCESS;
