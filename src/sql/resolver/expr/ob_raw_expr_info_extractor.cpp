@@ -183,19 +183,10 @@ int ObRawExprInfoExtractor::add_const(ObRawExpr &expr)
       is_const_expr = is_const_inherit;
     }
   }
-  // AI functions call remote services: they must not be treated as const
-  // expressions, otherwise the optimizer may fold repeated calls into one.
-  if (OB_SUCC(ret) && is_const_expr && expr.is_sys_func_expr()) {
-    bool is_non_pure = false;
-    if (OB_FAIL(expr.is_non_pure_sys_func_expr(is_non_pure))) {
-    } else if (is_non_pure) {
-      is_const_expr = false;
-    }
-  }
-  if (OB_SUCC(ret) && is_const_expr) {
+  if (is_const_expr) {
     if (OB_FAIL(expr.add_flag(IS_CONST_EXPR))) {
     }
-  } else if (OB_SUCC(ret) && cnt_const_expr) {
+  } else if (cnt_const_expr) {
     if (OB_FAIL(expr.add_flag(CNT_CONST_EXPR))) {
     }
   }
