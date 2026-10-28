@@ -271,6 +271,74 @@ int ObOllamaUtils::ObOllamaComplete::get_header(common::ObIAllocator &allocator,
   return ObOllamaUtils::get_header(allocator, headers);
 }
 
+namespace {
+
+int add_ollama_stream_and_options(ObIAllocator &allocator,
+                                  ObJsonObject *config,
+                                  ObJsonObject *body_obj)
+{
+  int ret = OB_SUCCESS;
+  ObJsonBoolean *stream_false = nullptr;
+  if (OB_FAIL(ObAIFuncJsonUtils::get_json_boolean(allocator, false, stream_false))) {
+  } else if (OB_FAIL(body_obj->add("stream", stream_false))) {
+  } else if (OB_ISNULL(config) || config->element_count() == 0) {
+    // no options / format needed
+  } else {
+    ObJsonObject *options = nullptr;
+    if (OB_FAIL(ObAIFuncJsonUtils::get_json_object(allocator, options))) {
+    } else {
+      // temperature -> options.temperature
+      ObJsonNode *temp_node = config->get_value("temperature");
+      if (OB_NOT_NULL(temp_node)) {
+        if (temp_node->json_type() != ObJsonNodeType::J_INT &&
+            temp_node->json_type() != ObJsonNodeType::J_UINT &&
+            temp_node->json_type() != ObJsonNodeType::J_DOUBLE) {
+          ret = OB_INVALID_ARGUMENT;
+          LOG_USER_ERROR(OB_INVALID_ARGUMENT, "ai_complete, temperature must be a number");
+        } else if (OB_FAIL(options->add("temperature", temp_node))) {
+        }
+      }
+      // max_tokens -> options.num_predict
+      ObJsonNode *max_tokens_node = config->get_value("max_tokens");
+      if (OB_SUCC(ret) && OB_NOT_NULL(max_tokens_node)) {
+        if (max_tokens_node->json_type() != ObJsonNodeType::J_INT &&
+            max_tokens_node->json_type() != ObJsonNodeType::J_UINT) {
+          ret = OB_INVALID_ARGUMENT;
+          LOG_USER_ERROR(OB_INVALID_ARGUMENT, "ai_complete, max_tokens must be an integer");
+        } else if (OB_FAIL(options->add("num_predict", max_tokens_node))) {
+        }
+      }
+      // response_format.type == "json_object" -> format: "json"
+      ObJsonNode *rf_node = config->get_value("response_format");
+      if (OB_SUCC(ret) && OB_NOT_NULL(rf_node)) {
+        if (rf_node->json_type() != ObJsonNodeType::J_OBJECT) {
+          ret = OB_INVALID_ARGUMENT;
+          LOG_USER_ERROR(OB_INVALID_ARGUMENT, "ai_complete, response_format must be an object");
+        } else {
+          ObJsonNode *type_node = static_cast<ObJsonObject *>(rf_node)->get_value("type");
+          if (OB_NOT_NULL(type_node) && type_node->json_type() == ObJsonNodeType::J_STRING) {
+            ObString type_str = static_cast<ObJsonString *>(type_node)->get_str();
+            if (0 == type_str.case_compare("json_object")) {
+              ObJsonString *json_str = nullptr;
+              ObString json_val("json");
+              if (OB_FAIL(ObAIFuncJsonUtils::get_json_string(allocator, json_val, json_str))) {
+              } else if (OB_FAIL(body_obj->add("format", json_str))) {
+              }
+            }
+          }
+        }
+      }
+      if (OB_SUCC(ret) && options->element_count() > 0) {
+        if (OB_FAIL(body_obj->add("options", options))) {
+        }
+      }
+    }
+  }
+  return ret;
+}
+
+} // namespace
+
 int ObOllamaUtils::ObOllamaComplete::get_body(common::ObIAllocator &allocator,
                                               common::ObString &model,
                                               common::ObString &prompt,
@@ -291,7 +359,7 @@ int ObOllamaUtils::ObOllamaComplete::get_body(common::ObIAllocator &allocator,
     } else if (OB_FAIL(body_obj->add("model", model_str))) {
     } else if (OB_FAIL(ObAIFuncJsonUtils::get_json_string(allocator, content, content_str))) {
     } else if (OB_FAIL(body_obj->add("prompt", content_str))) {
-    } else if (OB_NOT_NULL(config) && OB_FAIL(ObAIFuncJsonUtils::compact_json_object(allocator, config, body_obj))) {
+    } else if (OB_FAIL(add_ollama_stream_and_options(allocator, config, body_obj))) {
     } else {
       body = body_obj;
     }
