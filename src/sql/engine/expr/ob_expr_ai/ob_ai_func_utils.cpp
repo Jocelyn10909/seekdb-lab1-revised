@@ -231,19 +231,51 @@ int ObOpenAIUtils::ObOpenAIEmbed::parse_output(common::ObIAllocator &allocator,
       ret = OB_INVALID_DATA;
     } else {
       ObJsonArray *data_array = static_cast<ObJsonArray *>(data_node);
-      ObJsonNode *embedding_node = nullptr;
-      for (int64_t i = 0; OB_SUCC(ret) && i < data_array->element_count(); i++) {
-        if (OB_ISNULL(embedding_node = data_array->get_value(i))) {
-          ret = OB_INVALID_DATA;
-        } else if (embedding_node->json_type() != ObJsonNodeType::J_OBJECT) {
+      const int64_t n = data_array->element_count();
+      ObArray<ObJsonArray *> slots;
+      if (n == 0) {
+        ret = OB_INVALID_DATA;
+      } else if (OB_FAIL(slots.reserve(n))) {
+      } else {
+        for (int64_t i = 0; OB_SUCC(ret) && i < n; i++) {
+          if (OB_FAIL(slots.push_back(static_cast<ObJsonArray *>(nullptr)))) {
+          }
+        }
+      }
+      for (int64_t i = 0; OB_SUCC(ret) && i < n; i++) {
+        ObJsonNode *embedding_node = data_array->get_value(i);
+        if (OB_ISNULL(embedding_node) || embedding_node->json_type() != ObJsonNodeType::J_OBJECT) {
           ret = OB_INVALID_DATA;
         } else {
           ObJsonObject *embedding_obj = static_cast<ObJsonObject *>(embedding_node);
+          ObJsonNode *index_node = embedding_obj->get_value("index");
           ObJsonNode *embedding = embedding_obj->get_value("embedding");
-          if (OB_ISNULL(embedding)) {
+          if (OB_ISNULL(index_node) || !is_json_integer_type(index_node->json_type())) {
             ret = OB_INVALID_DATA;
-          } else if (OB_FAIL(result_array->append(embedding))) {
+          } else if (OB_ISNULL(embedding) || embedding->json_type() != ObJsonNodeType::J_ARRAY) {
+            ret = OB_INVALID_DATA;
+          } else {
+            int64_t idx = 0;
+            if (index_node->json_type() == ObJsonNodeType::J_INT) {
+              idx = static_cast<ObJsonInt *>(index_node)->get_int();
+            } else if (index_node->json_type() == ObJsonNodeType::J_UINT) {
+              idx = static_cast<int64_t>(static_cast<ObJsonUint *>(index_node)->get_uint());
+            } else {
+              ret = OB_INVALID_DATA;
+            }
+            if (OB_FAIL(ret)) {
+            } else if (idx < 0 || idx >= n || OB_NOT_NULL(slots.at(idx))) {
+              ret = OB_INVALID_DATA;
+            } else {
+              slots.at(idx) = static_cast<ObJsonArray *>(embedding);
+            }
           }
+        }
+      }
+      for (int64_t i = 0; OB_SUCC(ret) && i < n; i++) {
+        if (OB_ISNULL(slots.at(i))) {
+          ret = OB_INVALID_DATA;
+        } else if (OB_FAIL(result_array->append(slots.at(i)))) {
         }
       }
       if (OB_SUCC(ret)) {
@@ -668,12 +700,51 @@ int ObDashscopeUtils::ObDashscopeEmbed::parse_output(common::ObIAllocator &alloc
     } else if (OB_ISNULL(embeddings_array = static_cast<ObJsonArray *>(output_obj->get_value("embeddings")))) {
       ret = OB_INVALID_DATA;
     } else {
-      for (int64_t i = 0; OB_SUCC(ret) && i < embeddings_array->element_count(); ++i) {
-        if (OB_ISNULL(embedding_obj = static_cast<ObJsonObject *>(embeddings_array->get_value(i)))) {
+      const int64_t n = embeddings_array->element_count();
+      ObArray<ObJsonArray *> slots;
+      if (n == 0) {
+        ret = OB_INVALID_DATA;
+      } else if (OB_FAIL(slots.reserve(n))) {
+      } else {
+        for (int64_t i = 0; OB_SUCC(ret) && i < n; i++) {
+          if (OB_FAIL(slots.push_back(static_cast<ObJsonArray *>(nullptr)))) {
+          }
+        }
+      }
+      for (int64_t i = 0; OB_SUCC(ret) && i < n; i++) {
+        ObJsonNode *embedding_node = embeddings_array->get_value(i);
+        if (OB_ISNULL(embedding_node) || embedding_node->json_type() != ObJsonNodeType::J_OBJECT) {
           ret = OB_INVALID_DATA;
-        } else if (OB_ISNULL(embedding_array = static_cast<ObJsonArray *>(embedding_obj->get_value("embedding")))) {
+        } else {
+          ObJsonObject *embedding_obj = static_cast<ObJsonObject *>(embedding_node);
+          ObJsonNode *index_node = embedding_obj->get_value("text_index");
+          ObJsonNode *embedding = embedding_obj->get_value("embedding");
+          if (OB_ISNULL(index_node) || !is_json_integer_type(index_node->json_type())) {
+            ret = OB_INVALID_DATA;
+          } else if (OB_ISNULL(embedding) || embedding->json_type() != ObJsonNodeType::J_ARRAY) {
+            ret = OB_INVALID_DATA;
+          } else {
+            int64_t idx = 0;
+            if (index_node->json_type() == ObJsonNodeType::J_INT) {
+              idx = static_cast<ObJsonInt *>(index_node)->get_int();
+            } else if (index_node->json_type() == ObJsonNodeType::J_UINT) {
+              idx = static_cast<int64_t>(static_cast<ObJsonUint *>(index_node)->get_uint());
+            } else {
+              ret = OB_INVALID_DATA;
+            }
+            if (OB_FAIL(ret)) {
+            } else if (idx < 0 || idx >= n || OB_NOT_NULL(slots.at(idx))) {
+              ret = OB_INVALID_DATA;
+            } else {
+              slots.at(idx) = static_cast<ObJsonArray *>(embedding);
+            }
+          }
+        }
+      }
+      for (int64_t i = 0; OB_SUCC(ret) && i < n; i++) {
+        if (OB_ISNULL(slots.at(i))) {
           ret = OB_INVALID_DATA;
-        } else if (OB_FAIL(result_array->append(embedding_array))) {
+        } else if (OB_FAIL(result_array->append(slots.at(i)))) {
         }
       }
       if (OB_SUCC(ret)) {
