@@ -221,15 +221,41 @@ int ObExprAIRerank::eval_ai_rerank_with_doc_key(const ObExpr &expr, ObEvalCtx &c
   ObJsonArray *doc_array = nullptr;
   ObJsonArray *result_array = nullptr;
   ObJsonArray *sorted_document_array = nullptr;
+  ObArray<ObString> header_array;
+  int64_t batch_size = 20;
+  ObString score_key(SCORE_KEY);
+  int64_t end_idx = 0;
+  ObJsonArray *compact_array = nullptr;
+  ObJsonArray *batch_result_array = nullptr;
+  ObJsonArray *batch_document_array = nullptr;
+
   if (OB_FAIL(get_doc_array_from_documents_array_with_key(allocator, document_array, doc_key, doc_array))) {
+  } else if (OB_FAIL(ObAIFuncUtils::get_header(allocator, info, endpoint_info, header_array))) {
+  } else if (OB_FAIL(ObAIFuncJsonUtils::get_json_array(allocator, result_array))) {
   } else {
-    ObAIFuncModel model(allocator, info, endpoint_info);
-    if (OB_FAIL(model.call_rerank(query, doc_array, result_array))) {
-    } else if (OB_FAIL(validate_and_sort_rerank_result(allocator,
-                                                       document_array->element_count(),
-                                                       result_array))) {
-    } else if (OB_FAIL(sort_document_array_by_model_result(allocator, document_array, result_array, sorted_document_array))) {
-    } 
+    for (int64_t i = 0; OB_SUCC(ret) && i < doc_array->element_count(); i += batch_size) {
+      end_idx = i + batch_size;
+      if (end_idx > doc_array->element_count()) {
+        end_idx = doc_array->element_count();
+      }
+      if (OB_FAIL(construct_batch_document_array(allocator, doc_array, i, end_idx, batch_document_array))) {
+      } else if (OB_FAIL(inner_eval_ai_rerank(allocator, info, endpoint_info, header_array,
+                                              query, batch_document_array, batch_result_array))) {
+      } else if (OB_FAIL(batch_result_add_base(allocator, batch_result_array, i))) {
+      } else if (OB_FAIL(compact_json_array_by_key(allocator, result_array, batch_result_array,
+                                                   score_key, compact_array))) {
+      } else {
+        result_array = compact_array;
+      }
+    }
+    if (OB_SUCC(ret)) {
+      if (OB_FAIL(validate_and_sort_rerank_result(allocator,
+                                                  document_array->element_count(),
+                                                  result_array))) {
+      } else if (OB_FAIL(sort_document_array_by_model_result(allocator, document_array,
+                                                             result_array, sorted_document_array))) {
+      }
+    }
   }
   if (OB_SUCC(ret)) {
     ObString raw_str;
