@@ -24,6 +24,25 @@ namespace oceanbase
 namespace common 
 {
 
+bool ObAIFuncUtils::is_ai_json_integer_type(const ObJsonNodeType type)
+{
+  return type == ObJsonNodeType::J_INT ||
+         type == ObJsonNodeType::J_UINT ||
+         type == ObJsonNodeType::J_OINT ||
+         type == ObJsonNodeType::J_OLONG;
+}
+
+bool ObAIFuncUtils::is_ai_json_number_type(const ObJsonNodeType type)
+{
+  return ObAIFuncUtils::is_ai_json_integer_type(type) ||
+         type == ObJsonNodeType::J_DOUBLE ||
+         type == ObJsonNodeType::J_DECIMAL ||
+         type == ObJsonNodeType::J_OFLOAT ||
+         type == ObJsonNodeType::J_ODOUBLE ||
+         type == ObJsonNodeType::J_ODECIMAL;
+}
+
+
 int ObOpenAIUtils::get_header(common::ObIAllocator &allocator,
                               ObString &api_key,
                               common::ObArray<ObString> &headers) 
@@ -250,7 +269,7 @@ int ObOpenAIUtils::ObOpenAIEmbed::parse_output(common::ObIAllocator &allocator,
           ObJsonObject *embedding_obj = static_cast<ObJsonObject *>(embedding_node);
           ObJsonNode *index_node = embedding_obj->get_value("index");
           ObJsonNode *embedding = embedding_obj->get_value("embedding");
-          if (OB_ISNULL(index_node) || !is_json_integer_type(index_node->json_type())) {
+          if (OB_ISNULL(index_node) || !ObAIFuncUtils::is_ai_json_integer_type(index_node->json_type())) {
             ret = OB_INVALID_DATA;
           } else if (OB_ISNULL(embedding) || embedding->json_type() != ObJsonNodeType::J_ARRAY) {
             ret = OB_INVALID_DATA;
@@ -719,7 +738,7 @@ int ObDashscopeUtils::ObDashscopeEmbed::parse_output(common::ObIAllocator &alloc
           ObJsonObject *embedding_obj = static_cast<ObJsonObject *>(embedding_node);
           ObJsonNode *index_node = embedding_obj->get_value("text_index");
           ObJsonNode *embedding = embedding_obj->get_value("embedding");
-          if (OB_ISNULL(index_node) || !is_json_integer_type(index_node->json_type())) {
+          if (OB_ISNULL(index_node) || !ObAIFuncUtils::is_ai_json_integer_type(index_node->json_type())) {
             ret = OB_INVALID_DATA;
           } else if (OB_ISNULL(embedding) || embedding->json_type() != ObJsonNodeType::J_ARRAY) {
             ret = OB_INVALID_DATA;
@@ -1039,30 +1058,6 @@ int ObAIFuncUtils::parse_rerank_output(ObIAllocator &allocator,
   return ret;
 }
 
-namespace {
-
-// Integer types: J_INT, J_UINT and the SQL/JSON extended integer types.
-bool is_json_integer_type(const ObJsonNodeType type)
-{
-  return type == ObJsonNodeType::J_INT ||
-         type == ObJsonNodeType::J_UINT ||
-         type == ObJsonNodeType::J_OINT ||
-         type == ObJsonNodeType::J_OLONG;
-}
-
-// Any numeric type, including DECIMAL and the SQL/JSON extended numeric types.
-bool is_json_number_type(const ObJsonNodeType type)
-{
-  return is_json_integer_type(type) ||
-         type == ObJsonNodeType::J_DOUBLE ||
-         type == ObJsonNodeType::J_DECIMAL ||
-         type == ObJsonNodeType::J_OFLOAT ||
-         type == ObJsonNodeType::J_ODOUBLE ||
-         type == ObJsonNodeType::J_ODECIMAL;
-}
-
-} // namespace
-
 int ObAIFuncUtils::validate_ai_complete_config(ObJsonObject *config)
 {
   int ret = OB_SUCCESS;
@@ -1071,14 +1066,14 @@ int ObAIFuncUtils::validate_ai_complete_config(ObJsonObject *config)
   } else {
     // max_tokens must be integer
     ObJsonNode *max_tokens = config->get_value("max_tokens");
-    if (OB_NOT_NULL(max_tokens) && !is_json_integer_type(max_tokens->json_type())) {
+    if (OB_NOT_NULL(max_tokens) && !ObAIFuncUtils::is_ai_json_integer_type(max_tokens->json_type())) {
       ret = OB_INVALID_ARGUMENT;
       LOG_USER_ERROR(OB_INVALID_ARGUMENT, "ai_complete, max_tokens must be an integer");
     }
     // temperature must be a number
     ObJsonNode *temperature = config->get_value("temperature");
     if (OB_SUCC(ret) && OB_NOT_NULL(temperature) &&
-        !is_json_number_type(temperature->json_type())) {
+        !ObAIFuncUtils::is_ai_json_number_type(temperature->json_type())) {
       ret = OB_INVALID_ARGUMENT;
       LOG_USER_ERROR(OB_INVALID_ARGUMENT, "ai_complete, temperature must be a number");
     }
