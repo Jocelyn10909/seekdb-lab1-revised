@@ -15,6 +15,8 @@
  */
 
 #define USING_LOG_PREFIX SQL_ENG
+#include <algorithm>
+#include <vector>
 #include "ob_expr_ai_rerank.h"
 #include "query/ai/ob_ai_endpoint_resolver.h"
 #include "share/rc/ob_server_runtime.h"
@@ -194,6 +196,12 @@ int ObExprAIRerank::eval_ai_rerank(const ObExpr &expr, ObEvalCtx &ctx, ObDatum &
         }
       }
       if (OB_SUCC(ret)) {
+        if (OB_FAIL(validate_and_sort_rerank_result(temp_allocator,
+                                                    document_array->element_count(),
+                                                    result_array))) {
+        }
+      }
+      if (OB_SUCC(ret)) {
         ObString raw_str;
         if (OB_FAIL(result_array->get_raw_binary(raw_str, &temp_allocator))) {
         } else if (OB_FAIL(ObJsonExprHelper::pack_json_str_res(expr, ctx, res, raw_str))) {
@@ -217,6 +225,9 @@ int ObExprAIRerank::eval_ai_rerank_with_doc_key(const ObExpr &expr, ObEvalCtx &c
   } else {
     ObAIFuncModel model(allocator, info, endpoint_info);
     if (OB_FAIL(model.call_rerank(query, doc_array, result_array))) {
+    } else if (OB_FAIL(validate_and_sort_rerank_result(allocator,
+                                                       document_array->element_count(),
+                                                       result_array))) {
     } else if (OB_FAIL(sort_document_array_by_model_result(allocator, document_array, result_array, sorted_document_array))) {
     } 
   }
@@ -351,6 +362,99 @@ int ObExprAIRerank::inner_eval_ai_rerank(ObIAllocator &allocator,
     ret = OB_ERR_UNEXPECTED;
   } else {
     result_array = res;
+  }
+  return ret;
+}
+
+int ObExprAIRerank::validate_and_sort_rerank_result(ObIAllocator &allocator,
+                                                    int64_t expected_count,
+                                                    ObJsonArray *&result_array)
+{
+  int ret = OB_SUCCESS;
+  if (OB_ISNULL(result_array)) {
+    ret = OB_ERR_UNEXPECTED;
+  } else if (result_array->element_count() != expected_count) {
+    ret = OB_INVALID_DATA;
+    LOG_USER_ERROR(OB_INVALID_DATA, "ai_rerank, result count mismatch");
+  } else if (expected_count > 0) {
+    std::vector<int64_t> input_pos(expected_count, -1);
+    std::vector<double> score_at(expected_count, 0.0);
+    for (int64_t i = 0; OB_SUCC(ret) && i < expected_count; i++) {
+      ObJsonObject *obj = static_cast<ObJsonObject *>(result_array->get_value(i));
+      if (OB_ISNULL(obj)) {
+        ret = OB_INVALID_DATA;
+        LOG_USER_ERROR(OB_INVALID_DATA, "ai_rerank, result item is not an object");
+      } else {
+        ObJsonNode *index_node = obj->get_value(INDEX_KEY);
+        ObJsonNode *score_node = obj->get_value(SCORE_KEY);
+        if (OB_ISNULL(index_node) || OB_ISNULL(score_node)) {
+          ret = OB_INVALID_DATA;
+          LOG_USER_ERROR(OB_INVALID_DATA, "ai_rerank, result item missing index or score");
+        } else if (index_node->json_type() != ObJsonNodeType::J_INT &&
+                   index_node->json_type() != ObJsonNodeType::J_UINT) {
+          ret = OB_INVALID_DATA;
+          LOG_USER_ERROR(OB_INVALID_DATA, "ai_rerank, result index is not integer");
+        } else if (score_node->json_type() != ObJsonNodeType::J_INT &&
+                   score_node->json_type() != ObJsonNodeType::J_UINT &&
+                   score_node->json_type() != ObJsonNodeType::J_DOUBLE) {
+          ret = OB_INVALID_DATA;
+          LOG_USER_ERROR(OB_INVALID_DATA, "ai_rerank, result score is not numeric");
+        } else {
+          int64_t idx = (index_node->json_type() == ObJsonNodeType::J_INT)
+                        ? static_cast<ObJsonInt *>(index_node)->value()
+                        : static_cast<int64_t>(static_cast<ObJsonUint *>(index_node)->value());
+          double score = 0.0;
+          if (score_node->json_type() == ObJsonNodeType::J_INT) {
+            score = static_cast<double>(static_cast<ObJsonInt *>(score_node)->value());
+          } else if (score_node->json_type() == ObJsonNodeType::J_UINT) {
+            score = static_cast<double>(static_cast<ObJsonUint *>(score_node)->value());
+          } else {
+            score = static_cast<ObJsonDouble *>(score_node)->value();
+          }
+          if (idx < 0 || idx >= expected_count) {
+            ret = OB_INVALID_DATA;
+            LOG_USER_ERROR(OB_INVALID_DATA, "ai_rerank, result index is out of range");
+          } else if (input_pos[idx] != -1) {
+            ret = OB_INVALID_DATA;
+            LOG_USER_ERROR(OB_INVALID_DATA, "ai_rerank, duplicate result index");
+          } else {
+            input_pos[idx] = i;
+            score_at[idx] = score;
+          }
+        }
+      }
+    }
+    for (int64_t i = 0; OB_SUCC(ret) && i < expected_count; i++) {
+      if (input_pos[i] == -1) {
+        ret = OB_INVALID_DATA;
+        LOG_USER_ERROR(OB_INVALID_DATA, "ai_rerank, missing result index");
+      }
+    }
+    if (OB_SUCC(ret)) {
+      std::vector<int64_t> sorted_idx(expected_count);
+      for (int64_t i = 0; i < expected_count; i++) {
+        sorted_idx[i] = i;
+      }
+      std::sort(sorted_idx.begin(), sorted_idx.end(),
+                [&](int64_t a, int64_t b) {
+                  if (score_at[a] != score_at[b]) {
+                    return score_at[a] > score_at[b];
+                  }
+                  return a < b;
+                });
+      ObJsonArray *new_array = nullptr;
+      if (OB_FAIL(ObAIFuncJsonUtils::get_json_array(allocator, new_array))) {
+      } else {
+        for (int64_t i = 0; OB_SUCC(ret) && i < expected_count; i++) {
+          ObJsonNode *obj = result_array->get_value(input_pos[sorted_idx[i]]);
+          if (OB_FAIL(new_array->append(obj))) {
+          }
+        }
+        if (OB_SUCC(ret)) {
+          result_array = new_array;
+        }
+      }
+    }
   }
   return ret;
 }
