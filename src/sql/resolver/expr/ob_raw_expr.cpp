@@ -1000,7 +1000,11 @@ int ObRawExpr::is_non_pure_sys_func_expr(bool &is_non_pure) const
         || T_FUN_SYS_RELEASE_LOCK == type_
         || T_FUN_SYS_RELEASE_ALL_LOCKS == type_
         || T_FUN_SYS_CURRENT_ROLE == type_
-        || T_FUN_SYS_IS_ENABLED_ROLE == type_) {
+        || T_FUN_SYS_IS_ENABLED_ROLE == type_
+        || T_FUN_SYS_AI_PROMPT == type_
+        || T_FUN_SYS_AI_COMPLETE == type_
+        || T_FUN_SYS_AI_EMBED == type_
+        || T_FUN_SYS_AI_RERANK == type_) {
     is_non_pure = true;
   }
   return ret;
